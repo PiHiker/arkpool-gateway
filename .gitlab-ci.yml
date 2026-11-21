@@ -1,0 +1,134 @@
+# Docker executor only; no Docker socket, privileged services, or deployment keys.
+image: debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+
+variables:
+  ARKPOOL_PUBLISH_IMAGES:
+    value: "0"
+    options:
+      - "0"
+      - "1"
+    description: "Set to 1 only to publish reviewed multiarchitecture images from protected main."
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+
+stages: [verify, publish]
+
+checks:
+  stage: verify
+  timeout: 10m
+  variables:
+    PYTHONDONTWRITEBYTECODE: "1"
+    DEBIAN_FRONTEND: noninteractive
+  before_script:
+    - test -f /.dockerenv
+    - apt-get update
+    - apt-get install -y --no-install-recommends python3 git ca-certificates openssl gpg podman
+    - python3 -B tor_repository.py /tmp/arkpool-tor-repository
+    - install -m 0644 /tmp/arkpool-tor-repository/keyring.gpg /usr/share/keyrings/arkpool-tor-archive.gpg
+    - install -m 0644 /tmp/arkpool-tor-repository/tor.sources /etc/apt/sources.list.d/arkpool-tor.sources
+    - install -m 0644 /tmp/arkpool-tor-repository/tor.pref /etc/apt/preferences.d/arkpool-tor
+    - apt-get update
+    - apt-get install -y --no-install-recommends tor libpcre2-8-0
+  script:
+    - python3 -B runtime_packages.py
+    - python3 -B scripts/check.py
+    - python3 -B scripts/check_platform_generators.py --quadlet-generator /usr/libexec/podman/quadlet
+    - python3 -B scripts/check_public_source.py
+
+container-build:
+  stage: verify
+  timeout: 20m
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    STORAGE_DRIVER: vfs
+  before_script:
+    - test -f /.dockerenv
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates podman
+    - update-ca-certificates
+  script:
+    - podman --storage-driver=vfs build --isolation=chroot --build-arg SOURCE_REVISION="$CI_COMMIT_SHA" --build-arg SOURCE_VERSION="$(sed -n '1p' VERSION)" --target test -t arkpool-gateway:test .
+    - podman --storage-driver=vfs run --rm --cgroups=disabled --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m --cap-drop ALL --security-opt no-new-privileges arkpool-gateway:test
+    - podman --storage-driver=vfs build --isolation=chroot --build-arg SOURCE_REVISION="$CI_COMMIT_SHA" --build-arg SOURCE_VERSION="$(sed -n '1p' VERSION)" --target runtime -t arkpool-gateway:runtime .
+    - podman --storage-driver=vfs run --rm --cgroups=disabled --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=8m --cap-drop ALL --security-opt no-new-privileges arkpool-gateway:runtime python3 /app/gateway.py selfcheck
+    - podman --storage-driver=vfs run --rm --cgroups=disabled --network none --read-only --entrypoint sh arkpool-gateway:runtime -ec 'test ! -e /app/tests.py && test ! -e /app/tests_tls.py && test ! -e /app/tests_dashboard.py'
+
+# Opt-in publication: protected-main web pipeline with ARKPOOL_PUBLISH_IMAGES=1.
+# Pushes and all other pipeline sources never publish images.
+publish-native-image:
+  stage: publish
+  timeout: 30m
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $ARKPOOL_PUBLISH_IMAGES == "1"'
+  parallel:
+    matrix:
+      - ARCH: amd64
+        RUNNER: saas-linux-small-amd64
+      - ARCH: arm64
+        RUNNER: saas-linux-small-arm64
+  tags: ['$RUNNER']
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    STORAGE_DRIVER: vfs
+  before_script:
+    - test -f /.dockerenv
+    - test "$(dpkg --print-architecture)" = "$ARCH"
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates podman
+  script:
+    - podman --storage-driver=vfs build --isolation=chroot --build-arg SOURCE_REVISION="$CI_COMMIT_SHA" --build-arg SOURCE_VERSION="$(sed -n '1p' VERSION)" --target test -t arkpool-gateway:test .
+    - podman --storage-driver=vfs run --rm --cgroups=disabled --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m --cap-drop ALL --security-opt no-new-privileges arkpool-gateway:test
+    - podman --storage-driver=vfs build --isolation=chroot --build-arg SOURCE_REVISION="$CI_COMMIT_SHA" --build-arg SOURCE_VERSION="$(sed -n '1p' VERSION)" --target runtime -t "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-$ARCH" .
+    - podman --storage-driver=vfs run --rm --cgroups=disabled --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-$ARCH" python3 /app/gateway.py selfcheck
+    - printf '%s' "$CI_REGISTRY_PASSWORD" | podman login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - podman --storage-driver=vfs push --digestfile "digest-$ARCH.txt" "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-$ARCH"
+    # A native build must not consume the runner's final free space. Only this
+    # disposable CI filesystem is inspected; there is no host/global pruning.
+    - |
+      df -h / /tmp
+      available_kib="$(df -Pk /var/lib/containers/storage | awk 'NR == 2 {print $4}')"
+      if ! test "$available_kib" -ge 8388608; then
+        echo "Translator build requires at least 8 GiB free in CI container storage" >&2
+        exit 1
+      fi
+    - podman --storage-driver=vfs build --isolation=chroot -f Dockerfile.translator --build-arg GATEWAY_IMAGE="$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-$ARCH" -t "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-translator-$ARCH" .
+    - podman --storage-driver=vfs run --rm --cgroups=disabled --network none --read-only --cap-drop ALL --security-opt no-new-privileges "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-translator-$ARCH" /app/translator_sv2 --version
+    - podman --storage-driver=vfs push --digestfile "digest-translator-$ARCH.txt" "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHA-translator-$ARCH"
+  artifacts:
+    paths: ['digest-*.txt']
+    expire_in: 30 days
+
+publish-multiarch-index:
+  stage: publish
+  timeout: 10m
+  needs: [publish-native-image]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true" && $ARKPOOL_PUBLISH_IMAGES == "1"'
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    STORAGE_DRIVER: vfs
+  before_script:
+    - test -f /.dockerenv
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates python3
+  script:
+    - python3 -B scripts/publish_image_index.py
+  artifacts:
+    paths: [image-digest.txt]
+    expire_in: 30 days
+
+publish-translator-index:
+  extends: publish-multiarch-index
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    STORAGE_DRIVER: vfs
+    IMAGE_VARIANT: translator
+  artifacts:
+    paths: [image-translator-digest.txt]
+    expire_in: 30 days

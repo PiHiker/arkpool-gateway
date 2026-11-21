@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 2.0,
+  "id": "arkpool-gateway",
+  "storage": {
+    "dataRoot": "data"
+  },
+  "category": "bitcoin",
+  "name": "ArkPool Gateway",
+  "version": "0.1.2-alpha.1.umbrel.1",
+  "tagline": "Private Bitcoin mining over Tor with Ark payouts",
+  "description": "Alpha community package. Open the authenticated dashboard for miner setup and live status. Use your complete mainnet Ark receive address as the miner username and x as password. Never provide wallet keys. Stratum V1 is available on private LAN port 23333 without TLS; upstream mining uses two independent Tor clients. Reserve the Umbrel LAN address and keep this port off the Internet. By default only miners in the same LAN subnet can connect. For routed private miners, select the explicit lan policy in app settings and maintain appropriate firewall restrictions. Counters describe this running process, not payments. This package is for fresh installations; importing an earlier operator-specific export requires a separately reviewed migration.",
+  "releaseNotes": "",
+  "developer": "ArkPool",
+  "website": "https://arkpool.org",
+  "dependencies": [],
+  "repo": "https://gitlab.com/arkpool/arkpool-gateway",
+  "support": "https://gitlab.com/arkpool/arkpool-gateway/-/issues",
+  "port": 23335,
+  "gallery": [],
+  "path": "",
+  "defaultUsername": "",
+  "defaultPassword": "",
+  "submitter": "ArkPool",
+  "submission": "https://gitlab.com/arkpool/arkpool-gateway/-/merge_requests/1",
+  "backupIgnore": [
+    "data/runtime/*"
+  ],
+  "environment": [
+    {
+      "name": "MINER_IPS",
+      "services": [
+        "gateway",
+        "ingress"
+      ],
+      "default": "subnet",
+      "options": [
+        "subnet",
+        "lan"
+      ],
+      "note": "subnet permits the detected LAN subnet; lan permits all RFC1918 sources. Keep firewall restrictions."
+    }
+  ],
+  "icon": "https://arkpool.org/favicon.svg"
+}

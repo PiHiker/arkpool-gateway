@@ -1,0 +1,105 @@
+name: arkpool-gateway
+
+x-runtime: &runtime
+  image: arkpool-gateway:local
+  pull_policy: never
+  user: "10001:10001"
+  init: true
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 64
+  cpus: 0.5
+  mem_limit: 192m
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=8m,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "2m"
+      max-file: "2"
+
+services:
+  tor-a:
+    <<: *runtime
+    command: [python3, /app/tor_supervisor.py]
+    volumes:
+      - tor-a-state:/var/lib/tor
+      - tor-a-socks:/run/tor-socks
+    networks: [tor-egress]
+
+  tor-b:
+    <<: *runtime
+    command: [python3, /app/tor_supervisor.py]
+    volumes:
+      - tor-b-state:/var/lib/tor
+      - tor-b-socks:/run/tor-socks
+    networks: [tor-egress]
+
+  gateway:
+    <<: *runtime
+    build: .
+    environment:
+      LAN_IP: ${LAN_IP:?Set LAN_IP in .env}
+      MINER_IPS: ${MINER_IPS:?Set MINER_IPS in .env}
+      LAN_CIDR: ${LAN_CIDR:-}
+      POOL_ONION: ${POOL_ONION:?Set POOL_ONION in .env}
+      POOL_PORT: ${POOL_PORT:-3333}
+      TOR_ROUTE_POLICY: ${TOR_ROUTE_POLICY:-round-robin}
+      TOR_ISOLATION: ${TOR_ISOLATION:-miner}
+      MINER_ACCOUNT_PINS: ${MINER_ACCOUNT_PINS:-}
+      DASHBOARD_CLIENT_IPS: ${DASHBOARD_CLIENT_IPS:-0}
+    depends_on:
+      tor-a:
+        condition: service_started
+      tor-b:
+        condition: service_started
+    volumes:
+      - gateway-socket:/run/arkpool
+      - tor-a-socks:/run/tor-a:ro
+      - tor-b-socks:/run/tor-b:ro
+    network_mode: none
+    healthcheck:
+      test: [CMD, python3, /app/gateway.py, healthcheck]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10m
+
+  ingress:
+    <<: *runtime
+    command: [python3, /app/ingress.py]
+    mem_limit: 64m
+    cpus: 0.25
+    environment:
+      LAN_IP: ${LAN_IP:?Set LAN_IP in .env}
+      MINER_IPS: ${MINER_IPS:?Set MINER_IPS in .env}
+      LAN_CIDR: ${LAN_CIDR:-}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - target: 3333
+        published: "${LAN_PORT:-3333}"
+        host_ip: ${LAN_IP:?Set LAN_IP in .env}
+        protocol: tcp
+    volumes:
+      - gateway-socket:/run/arkpool:ro
+    networks: [miner-lan]
+    healthcheck:
+      test: [CMD, python3, /app/ingress.py, healthcheck]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
+networks:
+  miner-lan: {}
+  tor-egress: {}
+
+volumes:
+  gateway-socket: {}
+  tor-a-state: {}
+  tor-a-socks: {}
+  tor-b-state: {}
+  tor-b-socks: {}

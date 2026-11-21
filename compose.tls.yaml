@@ -1,0 +1,18 @@
+# Loaded by gateway.sh only when TLS_ENABLED=1 in the private .env.
+# Plaintext remains available for existing miners and explicit fallback.
+services:
+  ingress:
+    environment:
+      TLS_ENABLED: "1"
+      LAN_PORT: ${LAN_PORT:-3333}
+      LAN_TLS_PORT: ${LAN_TLS_PORT:-3334}
+    ports:
+      - target: 3334
+        published: "${LAN_TLS_PORT:-3334}"
+        host_ip: ${LAN_IP:?Set LAN_IP in .env}
+        protocol: tcp
+    volumes:
+      - tls-identity:/var/lib/arkpool-tls
+
+volumes:
+  tls-identity: {}

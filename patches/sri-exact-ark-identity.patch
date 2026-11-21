@@ -1,0 +1,67 @@
+diff --git a/miner-apps/translator/src/lib/sv1/sv1_server/mod.rs b/miner-apps/translator/src/lib/sv1/sv1_server/mod.rs
+index 23c24d5..3ef7528 100644
+--- a/miner-apps/translator/src/lib/sv1/sv1_server/mod.rs
++++ b/miner-apps/translator/src/lib/sv1/sv1_server/mod.rs
+@@ -27,6 +27,7 @@ use crate::{
+     },
+     utils::{
+         AGGREGATED_CHANNEL_ID, KEEPALIVE_JOB_ID_DELIMITER, SubmitShareWithChannelId, TproxyMode,
++        requires_exact_upstream_identity,
+     },
+ };
+ use async_channel::{Receiver, Sender, unbounded};
+@@ -1485,10 +1486,10 @@ impl Sv1Server {
+ 
+         let miner_id = self.miner_counter.fetch_add(1, Ordering::SeqCst) + 1;
+         let user_identity = self.user_identity();
+-        // SRI patterns use `/`-delimited segments for payout mode parsing, so appending
+-        // a suffix would break pool-side validation.
++        // Opaque Ark identities and SRI payout patterns must reach the receiver unchanged.
++        // A worker suffix would change their pool-side account identity.
+         // See: https://github.com/stratum-mining/sv2-apps/issues/369
+-        let user_identity = if user_identity.starts_with("sri/") {
++        let user_identity = if requires_exact_upstream_identity(user_identity) {
+             user_identity.clone()
+         } else {
+             format!("{user_identity}.miner{miner_id}")
+diff --git a/miner-apps/translator/src/lib/utils.rs b/miner-apps/translator/src/lib/utils.rs
+index 0bca52f..af16d54 100644
+--- a/miner-apps/translator/src/lib/utils.rs
++++ b/miner-apps/translator/src/lib/utils.rs
+@@ -314,9 +314,15 @@ pub(crate) fn sv1_worker_name_from_sv1_username(sv1_username: &str) -> &str {
+         .unwrap_or(sv1_username)
+ }
+ 
++/// Identifies opaque account formats whose exact bytes are required by the receiver.
++/// This is an identity-preservation rule, not wallet/address validation.
++pub(crate) fn requires_exact_upstream_identity(identity: &str) -> bool {
++    identity.starts_with("sri/") || identity.starts_with("ark1") || identity.starts_with("tark1")
++}
++
+ /// Formats the user identity used by the single upstream channel in aggregated mode.
+ pub(crate) fn aggregated_upstream_user_identity(user_identity: &str) -> String {
+-    if user_identity.starts_with("sri/") {
++    if requires_exact_upstream_identity(user_identity) {
+         user_identity.to_string()
+     } else if let Some((account, _)) = user_identity.split_once('.') {
+         format!("{account}.translator-proxy")
+@@ -396,3 +402,19 @@ mod tests {
+         assert_eq!(tlv_user_identity.as_str(), Some(expected.as_str()));
+     }
+ }
++
++#[cfg(test)]
++mod arkpool_identity_tests {
++    use super::{aggregated_upstream_user_identity, requires_exact_upstream_identity};
++    #[test]
++    fn opaque_ark_identity_is_never_suffixed() {
++        for identity in ["ark1opaque-example", "tark1opaque-example"] {
++            assert!(requires_exact_upstream_identity(identity));
++            assert_eq!(aggregated_upstream_user_identity(identity), identity);
++        }
++        assert_eq!(
++            aggregated_upstream_user_identity("account.miner1"),
++            "account.translator-proxy"
++        );
++    }
++}

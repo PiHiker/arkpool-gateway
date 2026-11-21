@@ -1,0 +1,268 @@
+{
+  "services": {
+    "tor-a": {
+      "image": "registry.gitlab.com/arkpool/arkpool-gateway:sha-d4697372d0367d3bb942b0d8860032f4a456a41c@sha256:3c9545969d5f5d459d288d1a6e7534072bd9b1d255e02d7a71845256ce965681",
+      "user": "1000:1000",
+      "command": [
+        "python3",
+        "/app/tor_supervisor.py"
+      ],
+      "init": true,
+      "restart": "on-failure",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 64,
+      "cpus": 0.5,
+      "mem_limit": "192m",
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "2m",
+          "max-file": "2"
+        }
+      },
+      "volumes": [
+        "${APP_DATA_DIR}/data/tor-a-state:/var/lib/tor",
+        "${APP_DATA_DIR}/data/runtime/tor-a-socks:/run/tor-socks"
+      ],
+      "stop_grace_period": "30s"
+    },
+    "tor-b": {
+      "image": "registry.gitlab.com/arkpool/arkpool-gateway:sha-d4697372d0367d3bb942b0d8860032f4a456a41c@sha256:3c9545969d5f5d459d288d1a6e7534072bd9b1d255e02d7a71845256ce965681",
+      "user": "1000:1000",
+      "command": [
+        "python3",
+        "/app/tor_supervisor.py"
+      ],
+      "init": true,
+      "restart": "on-failure",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 64,
+      "cpus": 0.5,
+      "mem_limit": "192m",
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "2m",
+          "max-file": "2"
+        }
+      },
+      "volumes": [
+        "${APP_DATA_DIR}/data/tor-b-state:/var/lib/tor",
+        "${APP_DATA_DIR}/data/runtime/tor-b-socks:/run/tor-socks"
+      ],
+      "stop_grace_period": "30s"
+    },
+    "gateway": {
+      "image": "registry.gitlab.com/arkpool/arkpool-gateway:sha-d4697372d0367d3bb942b0d8860032f4a456a41c@sha256:3c9545969d5f5d459d288d1a6e7534072bd9b1d255e02d7a71845256ce965681",
+      "user": "1000:1000",
+      "command": [
+        "python3",
+        "/app/gateway.py"
+      ],
+      "init": true,
+      "restart": "on-failure",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 64,
+      "cpus": 0.5,
+      "mem_limit": "192m",
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "2m",
+          "max-file": "2"
+        }
+      },
+      "network_mode": "none",
+      "environment": {
+        "LAN_IP": "${APP_ARKPOOL_LAN_IP:?Private LAN detection required}",
+        "LAN_CIDR": "${APP_ARKPOOL_LAN_CIDR:?Private subnet detection required}",
+        "MINER_IPS": "subnet",
+        "POOL_ONION": "sj2uz24t77burdvmljhr6sjfp2ceyikmjz3gegvsokcsxzvauhq6paid.onion",
+        "POOL_PORT": "3333",
+        "TOR_ROUTE_POLICY": "round-robin",
+        "TOR_ISOLATION": "miner",
+        "DASHBOARD_SNAPSHOTS": "1",
+        "DASHBOARD_CLIENT_IPS": "0"
+      },
+      "depends_on": {
+        "tor-a": {
+          "condition": "service_started"
+        },
+        "tor-b": {
+          "condition": "service_started"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python3",
+          "/app/gateway.py",
+          "healthcheck"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 4,
+        "start_period": "10m"
+      },
+      "volumes": [
+        "${APP_DATA_DIR}/data/runtime/gateway-socket:/run/arkpool",
+        "${APP_DATA_DIR}/data/runtime/tor-a-socks:/run/tor-a:ro",
+        "${APP_DATA_DIR}/data/runtime/tor-b-socks:/run/tor-b:ro",
+        "${APP_DATA_DIR}/data/runtime/dashboard-gateway:/run/arkpool-dashboard"
+      ]
+    },
+    "ingress": {
+      "image": "registry.gitlab.com/arkpool/arkpool-gateway:sha-d4697372d0367d3bb942b0d8860032f4a456a41c@sha256:3c9545969d5f5d459d288d1a6e7534072bd9b1d255e02d7a71845256ce965681",
+      "user": "1000:1000",
+      "command": [
+        "python3",
+        "/app/ingress.py"
+      ],
+      "init": true,
+      "restart": "on-failure",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 64,
+      "cpus": 0.5,
+      "mem_limit": "64m",
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "2m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "LAN_IP": "${APP_ARKPOOL_LAN_IP:?Private LAN detection required}",
+        "LAN_CIDR": "${APP_ARKPOOL_LAN_CIDR:?Private subnet detection required}",
+        "MINER_IPS": "subnet",
+        "DASHBOARD_SNAPSHOTS": "1"
+      },
+      "ports": [
+        {
+          "target": 3333,
+          "published": "23333",
+          "host_ip": "${APP_ARKPOOL_LAN_IP:?Private LAN detection required}",
+          "protocol": "tcp"
+        }
+      ],
+      "volumes": [
+        "${APP_DATA_DIR}/data/runtime/gateway-socket:/run/arkpool:ro",
+        "${APP_DATA_DIR}/data/runtime/dashboard-ingress:/run/arkpool-dashboard"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python3",
+          "/app/ingress.py",
+          "healthcheck"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 4,
+        "start_period": "30s"
+      },
+      "depends_on": {
+        "gateway": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "web": {
+      "image": "registry.gitlab.com/arkpool/arkpool-gateway:sha-d4697372d0367d3bb942b0d8860032f4a456a41c@sha256:3c9545969d5f5d459d288d1a6e7534072bd9b1d255e02d7a71845256ce965681",
+      "user": "1000:1000",
+      "command": [
+        "python3",
+        "/app/appliance_ui.py"
+      ],
+      "init": true,
+      "restart": "on-failure",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "pids_limit": 64,
+      "cpus": 0.5,
+      "mem_limit": "64m",
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "2m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "LAN_IP": "${APP_ARKPOOL_LAN_IP:?Private LAN detection required}",
+        "LAN_PORT": "23333",
+        "LAN_TLS_PORT": "23334",
+        "TLS_ENABLED": "0",
+        "DASHBOARD_ENABLED": "1",
+        "DASHBOARD_AUTH": "platform",
+        "DASHBOARD_CLIENT_IPS": "0"
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python3",
+          "/app/appliance_ui.py",
+          "healthcheck"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 4,
+        "start_period": "30s"
+      },
+      "volumes": [
+        "${APP_DATA_DIR}/data/runtime/dashboard-gateway:/run/arkpool-dashboard/gateway:ro",
+        "${APP_DATA_DIR}/data/runtime/dashboard-ingress:/run/arkpool-dashboard/ingress:ro"
+      ]
+    },
+    "app_proxy": {
+      "environment": {
+        "APP_HOST": "arkpool-gateway_web_1",
+        "APP_PORT": "8080"
+      }
+    }
+  }
+}

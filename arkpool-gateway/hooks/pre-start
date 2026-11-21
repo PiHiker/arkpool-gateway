@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+APP_DIR="${APP_DATA_DIR:-$(readlink -f "$(dirname "${BASH_SOURCE[0]}")/..")}"
+DATA_DIR="${APP_DATA_ROOT:-${APP_DIR}/data}"
+# Umbrel creates bind directories with mode 0755. Tor requires private socket
+# parents; normalize only this app's known directories, never existing files.
+for relative in tor-a-state tor-b-state runtime runtime/tor-a-socks runtime/tor-b-socks runtime/gateway-socket runtime/dashboard-gateway runtime/dashboard-ingress; do
+    target="${DATA_DIR}/${relative}"
+    if [ -L "${target}" ]; then
+        echo 'ArkPool refuses a symlink in its private runtime directories' >&2
+        exit 1
+    fi
+    install -d -m 0700 -o 1000 -g 1000 "${target}"
+done

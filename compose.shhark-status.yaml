@@ -1,0 +1,54 @@
+services:
+  gateway:
+    environment:
+      DASHBOARD_SNAPSHOTS: '1'
+    volumes:
+      - dashboard-gateway:/run/arkpool-dashboard
+
+  ingress:
+    environment:
+      DASHBOARD_SNAPSHOTS: '1'
+    volumes:
+      - dashboard-ingress:/run/arkpool-dashboard
+
+  shhark-status:
+    image: arkpool-gateway:local
+    pull_policy: never
+    command: [python3, /app/appliance_ui.py, status-api]
+    init: true
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    cpus: 0.25
+    mem_limit: 64m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=4m,mode=1777
+    environment:
+      DASHBOARD_STATUS_TOKEN: ${SHHARK_STATUS_TOKEN:?Set a private 64-character hex token}
+      DASHBOARD_CLIENT_IPS: ${DASHBOARD_CLIENT_IPS:-0}
+    ports:
+      - target: 8080
+        published: "${SHHARK_STATUS_PORT:-3335}"
+        host_ip: ${LAN_IP:?Set LAN_IP in .env}
+        protocol: tcp
+    volumes:
+      - dashboard-gateway:/run/arkpool-dashboard/gateway:ro
+      - dashboard-ingress:/run/arkpool-dashboard/ingress:ro
+    networks: [miner-lan]
+    depends_on:
+      gateway:
+        condition: service_healthy
+      ingress:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python3, /app/appliance_ui.py, healthcheck]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
+volumes:
+  dashboard-gateway: {}
+  dashboard-ingress: {}

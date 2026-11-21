@@ -1,0 +1,34 @@
+ARG GATEWAY_IMAGE=arkpool-gateway:reviewed
+ARG SRI_REVISION=6b07996536449e588280c67f5d21d496b52afd56
+FROM rust:1.88-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89 AS translator-build
+ARG SRI_REVISION
+# Native CI uses Podman vfs: compiler artifacts must not become image layers.
+ENV CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+RUN apt-get -o APT::Update::Error-Mode=any update && \
+    apt-get install -y --no-install-recommends git capnproto libcapnp-dev && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /source
+RUN git init && git remote add origin https://github.com/stratum-mining/sv2-apps.git && \
+    git fetch --depth 1 origin "$SRI_REVISION" && git checkout --detach FETCH_HEAD && \
+    test "$(git rev-parse HEAD)" = "$SRI_REVISION"
+COPY patches/sri-exact-ark-identity.patch /tmp/identity.patch
+COPY patches/sri-security-dependencies.patch /tmp/security-dependencies.patch
+COPY scripts/verify-translator-dependencies.sh /tmp/verify-translator-dependencies.sh
+RUN git apply --check /tmp/identity.patch && git apply /tmp/identity.patch && \
+    git apply --check /tmp/security-dependencies.patch && git apply /tmp/security-dependencies.patch && \
+    cargo tree --locked -p translator_sv2 --no-default-features --edges normal --prefix none --format "{p}" > /tmp/translator-dependencies.txt && \
+    sh /tmp/verify-translator-dependencies.sh /tmp/translator-dependencies.txt && \
+    cargo test --locked -p translator_sv2 --no-default-features --lib && \
+    rm -rf /source/target/debug && \
+    cargo build --locked --release -p translator_sv2 --no-default-features && \
+    strip target/release/translator_sv2 && \
+    install -D -m 0555 target/release/translator_sv2 /out/translator_sv2 && \
+    rm -rf /source/target /usr/local/cargo/registry /usr/local/cargo/git /tmp/identity.patch /tmp/security-dependencies.patch /tmp/verify-translator-dependencies.sh /tmp/translator-dependencies.txt
+
+FROM ${GATEWAY_IMAGE} AS translator
+ARG SRI_REVISION
+COPY --from=translator-build --chmod=0555 /out/translator_sv2 /app/translator_sv2
+COPY --from=translator-build /source/LICENSE* /usr/share/doc/arkpool-translator/
+COPY --chmod=0444 translator_runtime.py native_relay.py dashboard_status.py /app/
+LABEL org.arkpool.translator.sri-revision="${SRI_REVISION}"
+CMD ["python3", "/app/translator_runtime.py"]

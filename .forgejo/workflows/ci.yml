@@ -1,0 +1,26 @@
+name: Offline validation
+on:
+  push:
+    branches: ['main']
+    tags: ['v*']
+  # Pull requests are validated by GitLab's isolated merge-request pipeline.
+  # Never execute contributor-controlled PR code on the operator runner.
+  # Operator-triggered validation remains available for an explicitly reviewed ref.
+  workflow_dispatch:
+
+jobs:
+  tests:
+    # Operator-provided, isolated runner: Linux, Python 3.10+, OpenSSL, Git and Node 20+.
+    # Never assign this label to a mining host or a wallet-bearing machine.
+    runs-on: arkpool-ci
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: https://github.com/actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Offline transport and release tests
+        run: python3 -B scripts/check.py
+      - name: Current-source privacy screen
+        run: python3 -B scripts/check_public_source.py

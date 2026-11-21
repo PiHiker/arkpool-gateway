@@ -1,0 +1,11 @@
+ClientOnly 1
+DormantCanceledByStartup 1
+DataDirectory /var/lib/tor
+AvoidDiskWrites 1
+SafeLogging 1
+SafeSocks 1
+SocksPort unix:/run/tor-socks/socks OnionTrafficOnly IsolateSOCKSAuth
+ControlPort 127.0.0.1:9051
+CookieAuthentication 1
+CookieAuthFile /var/lib/tor/control.authcookie
+Log err stdout
